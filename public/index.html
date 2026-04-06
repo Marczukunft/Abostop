@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AboStop SaaS v2</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">AboStop v2</p>
+        <h1>Kündigungs-Assistent als SaaS</h1>
+        <p class="subtitle">Login, Cloud-Datenbank, echte Benutzerkonten und vorbereitete E-Mail-Reminder.</p>
+      </div>
+      <div class="hero-actions hidden" id="appHeaderActions">
+        <span id="welcomeText"></span>
+        <button id="logoutBtn" class="secondary">Logout</button>
+      </div>
+    </header>
+
+    <main class="grid">
+      <section class="card auth-card" id="authCard">
+        <div class="tabs">
+          <button class="tab active" data-tab="login">Login</button>
+          <button class="tab" data-tab="register">Registrieren</button>
+        </div>
+
+        <form id="loginForm" class="tab-panel active">
+          <h2>Einloggen</h2>
+          <label>E-Mail<input name="email" type="email" required /></label>
+          <label>Passwort<input name="password" type="password" required /></label>
+          <button class="primary" type="submit">Login</button>
+        </form>
+
+        <form id="registerForm" class="tab-panel">
+          <h2>Konto anlegen</h2>
+          <label>Name<input name="name" required /></label>
+          <label>E-Mail<input name="email" type="email" required /></label>
+          <label>Passwort<input name="password" type="password" minlength="6" required /></label>
+          <button class="primary" type="submit">Registrieren</button>
+        </form>
+
+        <p id="authMessage" class="message"></p>
+      </section>
+
+      <section class="hidden" id="appContent">
+        <div class="grid app-grid">
+          <section class="card">
+            <h2>Abo anlegen</h2>
+            <form id="subscriptionForm" class="form-grid">
+              <label>Anbieter / Abo<input name="name" required placeholder="z. B. Netflix" /></label>
+              <label>Kategorie
+                <select name="category">
+                  <option>Streaming</option>
+                  <option>Fitness</option>
+                  <option>Software</option>
+                  <option>Versicherung</option>
+                  <option>Mobilfunk</option>
+                  <option>Sonstiges</option>
+                </select>
+              </label>
+              <label>Preis<input name="price" type="number" min="0" step="0.01" /></label>
+              <label>Rhythmus
+                <select name="billing_cycle">
+                  <option value="monatlich">monatlich</option>
+                  <option value="vierteljährlich">vierteljährlich</option>
+                  <option value="jährlich">jährlich</option>
+                </select>
+              </label>
+              <label>Nächste Verlängerung<input name="renewal_date" type="date" required /></label>
+              <label>Kündigungsfrist (Tage)<input name="notice_days" type="number" value="14" min="0" required /></label>
+              <label>Anbieter-E-Mail<input name="provider_email" type="email" /></label>
+              <label>Vertragsnummer<input name="contract_id" /></label>
+              <label class="full-width">Notizen<textarea name="notes" rows="3"></textarea></label>
+              <button type="submit" class="primary">Speichern</button>
+            </form>
+          </section>
+
+          <section class="card">
+            <h2>Übersicht</h2>
+            <div class="stats">
+              <div><span>Aktive Abos</span><strong id="statCount">0</strong></div>
+              <div><span>Monatlich</span><strong id="statMonthly">0,00 €</strong></div>
+              <div><span>Jährlich</span><strong id="statYearly">0,00 €</strong></div>
+              <div><span>Kritisch</span><strong id="statCritical">0</strong></div>
+            </div>
+            <button id="runReminderBtn" class="secondary">Reminder-Lauf testen</button>
+            <p class="hint">Der Button startet den Serverlauf sofort. E-Mails werden nur bei gesetzter SMTP-Konfiguration versendet.</p>
+          </section>
+
+          <section class="card full-span">
+            <div class="section-head">
+              <h2>Deine Abos</h2>
+              <div class="filters">
+                <select id="statusFilter">
+                  <option value="alle">Alle Status</option>
+                  <option value="kritisch">Kritisch</option>
+                  <option value="bald">Bald</option>
+                  <option value="ok">OK</option>
+                </select>
+                <input id="searchInput" placeholder="Suche..." />
+              </div>
+            </div>
+            <div id="subscriptionList" class="list"></div>
+          </section>
+
+          <section class="card full-span">
+            <h2>Kündigungsvorlage</h2>
+            <textarea id="templateOutput" rows="12" readonly placeholder="Wähle bei einem Abo: Kündigung"></textarea>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <template id="subscriptionCardTemplate">
+    <article class="subscription-item">
+      <div>
+        <div class="item-topline">
+          <h3 class="sub-name"></h3>
+          <span class="badge"></span>
+        </div>
+        <p class="meta"></p>
+        <p class="deadline"></p>
+      </div>
+      <div class="item-actions">
+        <button data-action="template" class="secondary small-btn">Kündigung</button>
+        <button data-action="delete" class="danger small-btn">Löschen</button>
+      </div>
+    </article>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>
