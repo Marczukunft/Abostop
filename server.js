@@ -254,8 +254,8 @@ async function sendDueReminders(options = {}) {
       buildTemplate(item),
       '',
       `App: ${APP_BASE_URL}`
-    ].join('
-');
+    ].join('\n');
+
     const html = `
       <h2>Kündigungsfrist erreicht</h2>
       <p>Hallo ${item.user_name},</p>
@@ -315,8 +315,8 @@ async function sendTestMailForUser(user) {
     '',
     `Zeit: ${new Date().toLocaleString('de-DE')}`,
     `App: ${APP_BASE_URL}`
-  ].join('
-');
+].join('\n');
+
 
   const html = `
     <h2>AboStop Testmail</h2>
