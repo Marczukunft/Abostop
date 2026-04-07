@@ -1,3 +1,4 @@
+
 const authCard = document.getElementById('authCard');
 const appContent = document.getElementById('appContent');
 const authMessage = document.getElementById('authMessage');
@@ -12,6 +13,8 @@ const templateOutput = document.getElementById('templateOutput');
 const searchInput = document.getElementById('searchInput');
 const statusFilter = document.getElementById('statusFilter');
 const runReminderBtn = document.getElementById('runReminderBtn');
+const testMailBtn = document.getElementById('testMailBtn');
+const mailStatus = document.getElementById('mailStatus');
 const cardTemplate = document.getElementById('subscriptionCardTemplate');
 
 const statCount = document.getElementById('statCount');
@@ -25,20 +28,30 @@ let currentUser = null;
 let subscriptions = [];
 
 function euro(value) {
-  return new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(value || 0);
+  return new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(Number(value || 0));
 }
 
 function showMessage(message, isError = false) {
-  authMessage.textContent = message;
+  authMessage.textContent = message || '';
   authMessage.classList.toggle('error', isError);
 }
 
+function showMailStatus(message, isError = false) {
+  if (!mailStatus) return;
+  mailStatus.textContent = message || '';
+  mailStatus.classList.toggle('error', !!isError);
+  mailStatus.classList.toggle('success', !!message && !isError);
+}
+
 async function api(path, options = {}) {
-  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(options.headers || {})
+  };
   if (token) headers.Authorization = `Bearer ${token}`;
   const response = await fetch(path, { ...options, headers });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || 'Fehler');
+  if (!response.ok) throw new Error(data.error || data.message || 'API-Fehler');
   return data;
 }
 
@@ -46,29 +59,33 @@ function setLoggedInState(isLoggedIn) {
   authCard.classList.toggle('hidden', isLoggedIn);
   appContent.classList.toggle('hidden', !isLoggedIn);
   appHeaderActions.classList.toggle('hidden', !isLoggedIn);
+  if (!isLoggedIn) showMailStatus('');
 }
 
 function monthlyEquivalent(item) {
+  const price = Number(item.price || 0);
   switch (item.billing_cycle) {
-    case 'jährlich': return Number(item.price || 0) / 12;
-    case 'vierteljährlich': return Number(item.price || 0) / 3;
-    default: return Number(item.price || 0);
+    case 'jährlich': return price / 12;
+    case 'vierteljährlich': return price / 3;
+    default: return price;
   }
 }
 
 function renderStats() {
   const monthly = subscriptions.reduce((sum, item) => sum + monthlyEquivalent(item), 0);
-  statCount.textContent = subscriptions.length;
+  const critical = subscriptions.filter((item) => item.status === 'kritisch').length;
+  statCount.textContent = String(subscriptions.length);
   statMonthly.textContent = euro(monthly);
   statYearly.textContent = euro(monthly * 12);
-  statCritical.textContent = subscriptions.filter((item) => item.status === 'kritisch').length;
+  statCritical.textContent = String(critical);
 }
 
 function renderSubscriptions() {
   const search = searchInput.value.trim().toLowerCase();
   const filter = statusFilter.value;
+
   const filtered = subscriptions.filter((item) => {
-    const matchesSearch = item.name.toLowerCase().includes(search);
+    const matchesSearch = !search || item.name.toLowerCase().includes(search) || item.category.toLowerCase().includes(search);
     const matchesStatus = filter === 'alle' ? true : item.status === filter;
     return matchesSearch && matchesStatus;
   });
@@ -175,8 +192,9 @@ subscriptionForm.addEventListener('submit', async (event) => {
     subscriptionForm.reset();
     subscriptionForm.notice_days.value = 14;
     await loadSubscriptions();
+    showMailStatus('Abo gespeichert.');
   } catch (error) {
-    alert(error.message);
+    showMailStatus(error.message, true);
   }
 });
 
@@ -193,10 +211,21 @@ searchInput.addEventListener('input', renderSubscriptions);
 statusFilter.addEventListener('change', renderSubscriptions);
 runReminderBtn.addEventListener('click', async () => {
   try {
+    showMailStatus('Reminder-Lauf wird gestartet ...');
     const data = await api('/api/reminders/run-now', { method: 'POST' });
-    alert(data.message);
+    showMailStatus(data.message || 'Reminder-Lauf fertig.');
   } catch (error) {
-    alert(error.message);
+    showMailStatus(error.message, true);
+  }
+});
+
+testMailBtn.addEventListener('click', async () => {
+  try {
+    showMailStatus('Testmail wird gesendet ...');
+    const data = await api('/api/reminders/test-email', { method: 'POST' });
+    showMailStatus(data.message || 'Testmail gesendet.');
+  } catch (error) {
+    showMailStatus(error.message, true);
   }
 });
 

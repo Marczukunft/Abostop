@@ -77,3 +77,5 @@ textarea { resize:vertical; }
   .full-width { grid-column:auto; }
   .filters { width:100%; flex-direction:column; }
 }
+
+.button-row{display:flex;gap:12px;flex-wrap:wrap;margin-top:16px}.inline-message{margin-top:12px;min-height:20px}.message.success{color:#7ff0a7}.message.error{color:#ff8d8d}

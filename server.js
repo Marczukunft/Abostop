@@ -1,3 +1,4 @@
+
 require('dotenv').config();
 const express = require('express');
 const path = require('path');
@@ -83,9 +84,15 @@ async function initDb() {
     reminder_date TEXT NOT NULL,
     sent_at TEXT DEFAULT CURRENT_TIMESTAMP,
     status TEXT DEFAULT 'sent',
+    note TEXT,
     UNIQUE(subscription_id, reminder_date),
     FOREIGN KEY (subscription_id) REFERENCES subscriptions(id)
   )`);
+
+  const cols = await all(`PRAGMA table_info(reminder_logs)`);
+  if (!cols.find((c) => c.name === 'note')) {
+    await run('ALTER TABLE reminder_logs ADD COLUMN note TEXT');
+  }
 }
 
 function signToken(user) {
@@ -138,15 +145,36 @@ function getStatus(item) {
 
 function buildTemplate(item) {
   const today = new Date().toLocaleDateString('de-DE');
-  const contractLine = item.contract_id ? `Vertragsnummer/Kundennummer: ${item.contract_id}\n` : '';
-  const emailLine = item.provider_email ? `An: ${item.provider_email}\n` : '';
-  return `${emailLine}Betreff: Kündigung meines Abonnements ${item.name}\n\nSehr geehrte Damen und Herren,\n\nhiermit kündige ich mein Abonnement "${item.name}" fristgerecht zum nächstmöglichen Termin.\n\n${contractLine}Bitte bestätigen Sie mir die Kündigung unter Angabe des Beendigungszeitpunkts schriftlich.\n\nMit freundlichen Grüßen\n\n[Vorname Nachname]\n[Adresse]\n[E-Mail]\n\nErstellt am: ${today}`;
+  const contractLine = item.contract_id ? `Vertragsnummer/Kundennummer: ${item.contract_id}
+` : '';
+  const emailLine = item.provider_email ? `An: ${item.provider_email}
+` : '';
+  return `${emailLine}Betreff: Kündigung meines Abonnements ${item.name}
+
+Sehr geehrte Damen und Herren,
+
+hiermit kündige ich mein Abonnement "${item.name}" fristgerecht zum nächstmöglichen Termin.
+
+${contractLine}Bitte bestätigen Sie mir die Kündigung unter Angabe des Beendigungszeitpunkts schriftlich.
+
+Mit freundlichen Grüßen
+
+[Vorname Nachname]
+[Adresse]
+[E-Mail]
+
+Erstellt am: ${today}`;
+}
+
+function getMailerConfigStatus() {
+  const required = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'MAIL_FROM'];
+  const missing = required.filter((key) => !process.env[key]);
+  return { ok: missing.length === 0, missing };
 }
 
 function createTransporter() {
-  const required = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'MAIL_FROM'];
-  const hasAll = required.every((key) => process.env[key]);
-  if (!hasAll) return null;
+  const status = getMailerConfigStatus();
+  if (!status.ok) return null;
   return nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port: Number(process.env.SMTP_PORT || 587),
@@ -154,37 +182,80 @@ function createTransporter() {
     auth: {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS
-    }
+    },
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 20000
   });
 }
 
-async function sendDueReminders() {
+async function sendMail({ to, subject, html, text }) {
+  const cfg = getMailerConfigStatus();
+  if (!cfg.ok) {
+    throw new Error(`SMTP nicht konfiguriert: ${cfg.missing.join(', ')}`);
+  }
+
   const transporter = createTransporter();
-  if (!transporter) {
-    console.log('Reminder-Lauf übersprungen: SMTP ist nicht konfiguriert.');
-    return;
+  await transporter.verify();
+  return transporter.sendMail({
+    from: process.env.MAIL_FROM,
+    to,
+    subject,
+    html,
+    text
+  });
+}
+
+async function sendDueReminders(options = {}) {
+  const { userId = null, forceTodayOnly = true } = options;
+  const cfg = getMailerConfigStatus();
+  if (!cfg.ok) {
+    const message = `Reminder-Lauf übersprungen: SMTP ist nicht konfiguriert (${cfg.missing.join(', ')})`;
+    console.log(message);
+    return { success: false, message, sent: 0, due: 0, checked: 0, errors: [] };
   }
 
   const subscriptions = await all(`
     SELECT s.*, u.email AS user_email, u.name AS user_name
     FROM subscriptions s
     JOIN users u ON u.id = s.user_id
-  `);
+    ${userId ? 'WHERE s.user_id = ?' : ''}
+  `, userId ? [userId] : []);
 
   const todayIso = new Date().toISOString().slice(0, 10);
+  const result = { success: true, message: 'Reminder-Lauf ausgeführt.', sent: 0, due: 0, checked: subscriptions.length, errors: [], items: [] };
 
   for (const item of subscriptions) {
     const reminderIso = getReminderDate(item).toISOString().slice(0, 10);
-    if (reminderIso !== todayIso) continue;
+    const isDue = forceTodayOnly ? reminderIso === todayIso : reminderIso <= todayIso;
+    if (!isDue) continue;
+
+    result.due += 1;
 
     const existing = await get(
-      'SELECT id FROM reminder_logs WHERE subscription_id = ? AND reminder_date = ?',
+      'SELECT id, status FROM reminder_logs WHERE subscription_id = ? AND reminder_date = ?',
       [item.id, reminderIso]
     );
-    if (existing) continue;
+    if (existing) {
+      result.items.push({ id: item.id, name: item.name, status: 'bereits-geloggt', reminderDate: reminderIso });
+      continue;
+    }
 
     const subject = `Kündigungsfrist heute: ${item.name}`;
     const monthly = monthlyEquivalent(item).toFixed(2).replace('.', ',');
+    const plain = [
+      `Hallo ${item.user_name},`,
+      '',
+      `für dein Abo ${item.name} ist heute der relevante Kündigungstag.`,
+      `Verlängerung: ${item.renewal_date}`,
+      `Kündigungsfrist: ${item.notice_days} Tage`,
+      `Monatlicher Gegenwert: ${monthly} €`,
+      '',
+      buildTemplate(item),
+      '',
+      `App: ${APP_BASE_URL}`
+    ].join('
+');
     const html = `
       <h2>Kündigungsfrist erreicht</h2>
       <p>Hallo ${item.user_name},</p>
@@ -200,25 +271,67 @@ async function sendDueReminders() {
     `;
 
     try {
-      await transporter.sendMail({
-        from: process.env.MAIL_FROM,
-        to: item.user_email,
-        subject,
-        html
-      });
+      const info = await sendMail({ to: item.user_email, subject, html, text: plain });
       await run(
-        'INSERT INTO reminder_logs (subscription_id, reminder_date, status) VALUES (?, ?, ?)',
-        [item.id, reminderIso, 'sent']
+        'INSERT INTO reminder_logs (subscription_id, reminder_date, status, note) VALUES (?, ?, ?, ?)',
+        [item.id, reminderIso, 'sent', info.messageId || 'ok']
       );
+      result.sent += 1;
+      result.items.push({ id: item.id, name: item.name, status: 'sent', reminderDate: reminderIso });
       console.log(`Reminder gesendet für ${item.name} an ${item.user_email}`);
     } catch (error) {
-      console.error('Reminder-Fehler:', error.message);
+      const err = error && error.message ? error.message : String(error);
+      console.error(`Reminder-Fehler für ${item.name}: ${err}`);
       await run(
-        'INSERT OR IGNORE INTO reminder_logs (subscription_id, reminder_date, status) VALUES (?, ?, ?)',
-        [item.id, reminderIso, 'error']
+        'INSERT OR IGNORE INTO reminder_logs (subscription_id, reminder_date, status, note) VALUES (?, ?, ?, ?)',
+        [item.id, reminderIso, 'error', err.slice(0, 400)]
       );
+      result.errors.push({ id: item.id, name: item.name, error: err });
+      result.items.push({ id: item.id, name: item.name, status: 'error', reminderDate: reminderIso, error: err });
     }
   }
+
+  if (!result.due) {
+    result.message = 'Reminder-Lauf ausgeführt, aber heute war kein Abo fällig.';
+  } else if (!result.sent && !result.errors.length) {
+    result.message = 'Reminder-Lauf ausgeführt, aber alle fälligen Erinnerungen waren bereits protokolliert.';
+  } else if (result.errors.length) {
+    result.success = false;
+    result.message = `Reminder-Lauf mit Fehlern beendet (${result.errors.length}).`;
+  } else {
+    result.message = `${result.sent} Erinnerungs-Mail(s) gesendet.`;
+  }
+
+  return result;
+}
+
+async function sendTestMailForUser(user) {
+  const subject = 'AboStop Testmail';
+  const plain = [
+    `Hallo ${user.name},`,
+    '',
+    'das ist eine Testmail von AboStop.',
+    'Wenn du diese Mail siehst, funktionieren Render + Brevo + SMTP.',
+    '',
+    `Zeit: ${new Date().toLocaleString('de-DE')}`,
+    `App: ${APP_BASE_URL}`
+  ].join('
+');
+
+  const html = `
+    <h2>AboStop Testmail</h2>
+    <p>Hallo ${user.name},</p>
+    <p>wenn du diese Mail siehst, funktionieren <strong>Render + Brevo + SMTP</strong>.</p>
+    <ul>
+      <li>Zeit: ${new Date().toLocaleString('de-DE')}</li>
+      <li>Empfänger: ${user.email}</li>
+    </ul>
+    <p><a href="${APP_BASE_URL}">App öffnen</a></p>
+  `;
+
+  const info = await sendMail({ to: user.email, subject, html, text: plain });
+  console.log(`Testmail gesendet an ${user.email}`);
+  return { messageId: info.messageId || null, to: user.email };
 }
 
 app.post('/api/auth/register', async (req, res) => {
@@ -270,7 +383,7 @@ app.get('/api/subscriptions', auth, async (req, res) => {
     yearlyEquivalent: monthlyEquivalent(item) * 12,
     reminderDate: getReminderDate(item).toISOString().slice(0, 10)
   }));
-  res.json({ items: enriched });
+  res.json({ items });
 });
 
 app.post('/api/subscriptions', auth, async (req, res) => {
@@ -350,9 +463,25 @@ app.get('/api/stats', auth, async (req, res) => {
   });
 });
 
-app.post('/api/reminders/run-now', async (_req, res) => {
-  await sendDueReminders();
-  res.json({ success: true, message: 'Reminder-Lauf ausgeführt.' });
+app.post('/api/reminders/run-now', auth, async (req, res) => {
+  try {
+    const result = await sendDueReminders({ userId: req.user.userId, forceTodayOnly: true });
+    res.status(result.success ? 200 : 500).json(result);
+  } catch (error) {
+    console.error('run-now Fehler:', error);
+    res.status(500).json({ success: false, error: error.message || 'Unbekannter Fehler im Reminder-Lauf.' });
+  }
+});
+
+app.post('/api/reminders/test-email', auth, async (req, res) => {
+  try {
+    const user = await get('SELECT id, name, email FROM users WHERE id = ?', [req.user.userId]);
+    const info = await sendTestMailForUser(user);
+    res.json({ success: true, message: `Testmail gesendet an ${info.to}.`, info });
+  } catch (error) {
+    console.error('Testmail-Fehler:', error);
+    res.status(500).json({ success: false, error: error.message || 'Testmail fehlgeschlagen.' });
+  }
 });
 
 app.get('*', (_req, res) => {

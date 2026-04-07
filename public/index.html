@@ -86,8 +86,9 @@
               <div><span>Jährlich</span><strong id="statYearly">0,00 €</strong></div>
               <div><span>Kritisch</span><strong id="statCritical">0</strong></div>
             </div>
-            <button id="runReminderBtn" class="secondary">Reminder-Lauf testen</button>
-            <p class="hint">Der Button startet den Serverlauf sofort. E-Mails werden nur bei gesetzter SMTP-Konfiguration versendet.</p>
+            <div class="button-row"><button id="runReminderBtn" class="secondary">Reminder-Lauf testen</button><button id="testMailBtn" class="primary">Testmail senden</button></div>
+            <p id="mailStatus" class="message inline-message"></p>
+            <p class="hint">Reminder prüft nur heute fällige Abos. Testmail sendet sofort eine Mail an dein Konto.</p>
           </section>
 
           <section class="card full-span">

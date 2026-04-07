@@ -74,3 +74,7 @@ Für echten Live-Betrieb solltest du mindestens noch ergänzen:
 - Backups
 - TLS/HTTPS
 - Rechtstexte
+
+
+## Patch-Hinweis
+Diese Version enthält einen zusätzlichen Button **Testmail senden** und detailliertere Antworten für den Reminder-Lauf.
